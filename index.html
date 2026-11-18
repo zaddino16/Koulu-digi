@@ -1,0 +1,615 @@
+
+<!DOCTYPE html>
+<html lang="fi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>OppimisKeskus 3.0</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#f1f4fb;color:#26334b;font-family:Arial,sans-serif}
+header{padding:23px 5%;background:linear-gradient(120deg,#385be0,#8755d9);color:white}
+header h1{margin:0}
+nav{display:flex;gap:6px;flex-wrap:wrap;background:white;padding:13px;position:sticky;top:0;z-index:5;box-shadow:0 3px 12px #0001}
+button{border:0;border-radius:10px;background:#5369e8;color:white;padding:11px 15px;font-weight:bold;cursor:pointer;margin:3px}
+button:hover{filter:brightness(.9)}
+nav button{background:#edf0ff;color:#354a9b}
+main{max-width:1100px;margin:24px auto;padding:0 15px}
+.card{background:white;padding:20px;border-radius:17px;margin:14px 0;box-shadow:0 4px 18px #00000009}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px}
+input,textarea,select{width:100%;padding:12px;border:1px solid #d9dfeb;border-radius:10px;margin:7px 0 12px;font:inherit}
+textarea{min-height:90px}
+label{font-weight:bold}
+.hidden{display:none!important}
+.muted{color:#7b8495}
+.bad{color:#c0392b;font-weight:bold}
+.good{color:green;font-weight:bold}
+.item{border:1px solid #e4e8f1;padding:15px;border-radius:13px;margin:12px 0}
+.hero{background:linear-gradient(120deg,#e5ebff,#f2eaff);padding:27px;border-radius:18px}
+.big{font-size:30px;font-weight:bold;color:#5268df}
+.login{max-width:450px;margin:40px auto;padding:15px}
+footer{text-align:center;padding:25px;color:#888}
+hr{border:0;border-top:1px solid #e5e8f0;margin:20px 0}
+@media print{header,nav,button,footer,.no-print{display:none!important}body{background:white}.card{box-shadow:none}}
+</style>
+</head>
+<body>
+
+<header>
+<h1>📚 OppimisKeskus</h1>
+<p>Opiskele · Harjoittele · Onnistu 🇫🇮</p>
+</header>
+
+<div id="login" class="login">
+<div class="card">
+<h2>👋 Tervetuloa!</h2>
+<label>Käyttäjärooli</label>
+<select id="role">
+<option value="student">Oppilas</option>
+<option value="teacher">Opettaja</option>
+</select>
+<label>Oma nimi</label>
+<input id="name" placeholder="Kirjoita nimesi">
+<label>Valitse luokka</label>
+<select id="grade"></select>
+<label>Salasana</label>
+<input id="password" type="password" placeholder="Salasana">
+<button style="width:100%" onclick="login()">Kirjaudu sisään</button>
+<p id="error" class="bad"></p>
+</div>
+</div>
+
+<div id="site" class="hidden">
+<nav id="nav"></nav>
+<main id="main"></main>
+</div>
+
+<footer>OppimisKeskus 3.0 · Suomen kouluympäristö</footer>
+
+<script>
+"use strict";
+
+const STUDENT_PASS="649446";
+const TEACHER_PASS="9923345";
+const DB="oppimiskeskus_3_database";
+const GRADES=["7A","7B","7G","8A","8B","8G","9A","9B","9G"];
+const SUBJECTS=[
+"Matematiikka","Äidinkieli","Englanti","Ruotsi",
+"Historia","Yhteiskuntaoppi","Biologia","Maantieto",
+"Fysiikka","Kemia","Terveystieto","Uskonto","Muu"
+];
+
+let role="",username="",myGrade="",page="home";
+let gameAnswer=0,points=0,answered=0,gameType="mix";
+
+function fresh(){
+return {posts:[],quizzes:[],worksheets:[],comments:[],punishments:[]};
+}
+function getData(){
+try{return JSON.parse(localStorage.getItem(DB))||fresh()}
+catch(e){return fresh()}
+}
+function save(d){localStorage.setItem(DB,JSON.stringify(d))}
+function esc(s){
+return String(s||"").replace(/[&<>"']/g,c=>({
+"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"
+}[c]));
+}
+function gradeOptions(selected="ALL"){
+return `<option value="ALL" ${selected==="ALL"?"selected":""}>Kaikki luokat</option>`+
+GRADES.map(g=>`<option value="${g}" ${g===selected?"selected":""}>${g}</option>`).join("");
+}
+function subjectOptions(){
+return SUBJECTS.map(s=>`<option>${s}</option>`).join("");
+}
+function login(){
+let r=document.getElementById("role").value;
+let p=document.getElementById("password").value.trim();
+let n=document.getElementById("name").value.trim();
+let g=document.getElementById("grade").value;
+
+if(!n){error.textContent="Kirjoita oma nimesi!";return}
+if(!g){error.textContent="Valitse luokkasi!";return}
+
+if(r==="student"&&p===STUDENT_PASS)role="student";
+else if(r==="teacher"&&p===TEACHER_PASS)role="teacher";
+else{
+error.textContent="Väärä salasana! Yritä uudelleen.";
+document.getElementById("password").value="";
+return;
+}
+username=n;
+myGrade=g;
+page="home";
+document.getElementById("login").classList.add("hidden");
+document.getElementById("site").classList.remove("hidden");
+render();
+}
+document.getElementById("grade").innerHTML=
+GRADES.map(g=>`<option value="${g}">${g}</option>`).join("");
+document.getElementById("password").addEventListener("keydown",e=>{
+if(e.key==="Enter")login();
+});
+
+function logout(){
+role="";username="";myGrade="";
+document.getElementById("site").classList.add("hidden");
+document.getElementById("login").classList.remove("hidden");
+document.getElementById("password").value="";
+document.getElementById("name").value="";
+document.getElementById("error").textContent="";
+}
+
+function visible(item){
+return item.audience==="ALL"||item.audience===myGrade;
+}
+function audienceControl(id="audience"){
+return `<label>Kenelle julkaistaan?</label>
+<select id="${id}">
+${gradeOptions("ALL")}
+</select>
+<p class="muted">Valitse Kaikki luokat tai yksi tietty luokka.</p>`;
+}
+function render(){
+let pages=[
+["home","🏠 Etusivu"],["news","📢 Ilmoitukset"],
+["quizzes","📝 Kokeet"],["games","🎮 Matematiikka"],
+["worksheets","📄 Tehtäväpaperit"]
+];
+nav.innerHTML=pages.map(x=>
+`<button onclick="go('${x[0]}')">${x[1]}</button>`).join("")+
+(role==="teacher"?`
+<button onclick="go('tools')">🛠️ Opettaja</button>
+<button onclick="go('discipline')">📋 Jälki-istunto</button>`:"")+
+`<button onclick="logout()">🚪 Ulos</button>`;
+
+let m=document.getElementById("main");
+if(page==="home")home(m);
+if(page==="news")news(m);
+if(page==="quizzes")quizzes(m);
+if(page==="games")games(m);
+if(page==="worksheets")worksheets(m);
+if(page==="tools"&&role==="teacher")tools(m);
+if(page==="discipline"&&role==="teacher")discipline(m);
+}
+function go(p){page=p;render()}
+
+function home(m){
+let d=getData();
+m.innerHTML=`
+<div class="hero">
+<h2>Hei ${esc(username)}! 👋</h2>
+<p>Rooli: ${role==="teacher"?"Opettaja":"Oppilas"} · Luokka: ${esc(myGrade)}</p>
+<h3>Tervetuloa OppimisKeskukseen!</h3>
+</div>
+<div class="grid">
+<div class="card"><h3>📢 Ilmoitukset</h3><button onclick="go('news')">Avaa</button></div>
+<div class="card"><h3>📝 Kokeet</h3><button onclick="go('quizzes')">Avaa</button></div>
+<div class="card"><h3>🎮 Matematiikka</h3><button onclick="go('games')">Pelaa</button></div>
+<div class="card"><h3>📄 Tehtäväpaperit</h3><button onclick="go('worksheets')">Avaa</button></div>
+${role==="teacher"?`<div class="card"><h3>🛠️ Opettajan työkalut</h3><button onclick="go('tools')">Avaa</button></div>`:""}
+</div>
+<h3>📌 Sinun luokkasi: ${esc(myGrade)}</h3>
+`;
+}
+
+/* ANNOUNCEMENTS */
+
+function news(m){
+let d=getData();
+let posts=d.posts.filter(visible);
+m.innerHTML=`<h2>📢 Ilmoitukset</h2>
+${role==="teacher"?`
+<div class="card">
+<h3>Uusi ilmoitus</h3>
+<input id="postTitle" placeholder="Otsikko">
+<textarea id="postBody" placeholder="Ilmoituksen teksti"></textarea>
+${audienceControl("postAudience")}
+<button onclick="addPost()">Julkaise ilmoitus</button>
+</div>`:""}
+${posts.slice().reverse().map(p=>{
+let i=d.posts.indexOf(p);
+let liked=(p.likedBy||[]).includes(username);
+return `<div class="card">
+<h3>${esc(p.title)}</h3>
+<p>${esc(p.body)}</p>
+<small>${esc(p.author)} · ${esc(p.grade)} · ${p.audience==="ALL"?"Kaikki luokat":esc(p.audience)}</small>
+<p><button onclick="toggleLike(${i})">${liked?"❤️ Tykkäsit":"🤍 Tykkää"} (${(p.likedBy||[]).length})</button></p>
+<h4>Kommentit</h4>
+${(p.comments||[]).filter(visible).map(c=>`
+<div class="item"><b>${esc(c.author)}</b>: ${esc(c.text)}</div>`).join("")}
+<input id="comment${i}" placeholder="Kirjoita kommentti">
+${audienceControl("commentAudience"+i)}
+<button onclick="addComment(${i})">Lähetä kommentti</button>
+${role==="teacher"?`<button onclick="removePost(${i})">Poista</button>`:""}
+</div>`;
+}).join("")||`<div class="card">Ei ilmoituksia tälle luokalle.</div>`}`;
+}
+function addPost(){
+let title=postTitle.value.trim(),body=postBody.value.trim();
+if(!title||!body)return alert("Täytä otsikko ja teksti.");
+let d=getData();
+d.posts.push({
+title,body,author:username,grade:myGrade,
+audience:postAudience.value,likedBy:[],comments:[]
+});
+save(d);render();
+}
+function toggleLike(i){
+let d=getData(),p=d.posts[i];
+p.likedBy=p.likedBy||[];
+let at=p.likedBy.indexOf(username);
+if(at>=0)p.likedBy.splice(at,1);
+else p.likedBy.push(username);
+save(d);render();
+}
+const badWords=["vittu","perkele","saatana","paska","kusipää","idiootti","helvetti"];
+function filterText(text){
+let flagged=false;
+badWords.forEach(w=>{
+let re=new RegExp(w,"gi");
+if(re.test(text)){flagged=true;text=text.replace(re,"#".repeat(w.length))}
+});
+return {text,flagged};
+}
+function addComment(i){
+let el=document.getElementById("comment"+i);
+let text=el.value.trim();
+if(!text)return;
+let filtered=filterText(text);
+let d=getData();
+d.posts[i].comments.push({
+author:username,text:filtered.text,
+flagged:filtered.flagged,
+audience:document.getElementById("commentAudience"+i).value
+});
+save(d);render();
+if(filtered.flagged)alert("Sopimatonta kieltä havaittu. Sanat on suodatettu.");
+}
+function removePost(i){
+if(!confirm("Poistetaanko ilmoitus?"))return;
+let d=getData();d.posts.splice(i,1);save(d);render();
+}
+
+/* QUIZZES */
+
+function tools(m){
+m.innerHTML=`
+<h2>🛠️ Opettajan työkalut</h2>
+<div class="card">
+<h3>📝 Luo koe tai tietovisa</h3>
+<input id="quizTitle" placeholder="Kokeen nimi">
+<textarea id="quizDesc" placeholder="Ohjeet oppilaille"></textarea>
+${audienceControl("quizAudience")}
+<p>Kirjoita kysymykset muodossa Kysymys|Vastaus, yksi per rivi.</p>
+<textarea id="quizQuestions" placeholder="Paljonko 12 × 12?|144&#10;Paljonko 100 ÷ 4?|25"></textarea>
+<button onclick="addQuiz()">Julkaise koe</button>
+</div>
+<div class="card">
+<h3>📄 Tehtäväpaperin luonti</h3>
+<p>Rakenna oma tulostettava tehtäväpaperi osio kerrallaan.</p>
+<button onclick="go('worksheets')">Avaa tehtäväpaperit</button>
+</div>
+<div class="card">
+<h3>📢 Ilmoitukset</h3>
+<button onclick="go('news')">Luo ilmoitus</button>
+</div>`;
+}
+function addQuiz(){
+let title=quizTitle.value.trim(),desc=quizDesc.value.trim();
+let raw=quizQuestions.value.trim();
+if(!title||!raw)return alert("Täytä nimi ja kysymykset.");
+let questions=raw.split("\n").map(x=>x.split("|"))
+.filter(x=>x.length>=2&&x[0].trim()&&x[1].trim())
+.map(x=>({q:x[0].trim(),a:x.slice(1).join("|").trim()}));
+if(!questions.length)return alert("Tarkista kysymysten muoto.");
+let d=getData();
+d.quizzes.push({title,desc,author:username,audience:quizAudience.value,questions});
+save(d);go("quizzes");
+}
+function quizzes(m){
+let d=getData();
+let qs=d.quizzes.filter(visible);
+m.innerHTML=`<h2>📝 Kokeet ja tietovisat</h2>
+${role==="teacher"?`<button onclick="go('tools')">Luo uusi koe</button>`:""}
+${qs.map(q=>{
+let i=d.quizzes.indexOf(q);
+return `<div class="card">
+<h3>${esc(q.title)}</h3><p>${esc(q.desc)}</p>
+<small>Opettaja: ${esc(q.author)} · ${q.audience==="ALL"?"Kaikki luokat":esc(q.audience)}</small>
+${q.questions.map((x,j)=>`
+<div class="item"><b>${j+1}. ${esc(x.q)}</b>
+<input id="quiz${i}_${j}" placeholder="Vastaus"></div>`).join("")}
+<button onclick="checkQuiz(${i})">Tarkista vastaukset</button>
+<p id="quizScore${i}"></p>
+${role==="teacher"?`<button onclick="deleteQuiz(${i})">Poista koe</button>`:""}
+</div>`;
+}).join("")||`<div class="card">Ei kokeita tälle luokalle.</div>`}`;
+}
+function checkQuiz(i){
+let d=getData(),q=d.quizzes[i],score=0;
+q.questions.forEach((x,j)=>{
+let el=document.getElementById(`quiz${i}_${j}`);
+let ok=el.value.trim().toLowerCase()===x.a.toLowerCase();
+if(ok)score++;
+el.style.borderColor=ok?"green":"red";
+});
+document.getElementById("quizScore"+i).textContent=`Tulos: ${score}/${q.questions.length}`;
+}
+function deleteQuiz(i){
+let d=getData();d.quizzes.splice(i,1);save(d);render();
+}
+
+/* WORKSHEET BUILDER */
+
+let blocks=[];
+function worksheets(m){
+let d=getData();
+let ws=d.worksheets.filter(visible);
+m.innerHTML=`
+<h2>📄 Tehtäväpaperit</h2>
+${role==="teacher"?`
+<div class="card">
+<h3>✨ Luo oma tehtäväpaperi</h3>
+<label>Tehtäväpaperin otsikko</label>
+<input id="wsTitle" placeholder="Esim. Kahdeksannen luokan matematiikka">
+<label>Logo / koulun nimi</label>
+<input id="wsLogo" placeholder="Esim. OPPIMISKESKUS">
+<label>Aine</label>
+<select id="wsSubject">${subjectOptions()}</select>
+<label>Aihe</label>
+<input id="wsTopic" placeholder="Esim. Prosenttilaskut">
+<label>Luokka</label>
+<select id="wsAudience">${gradeOptions("ALL")}</select>
+<label>Ohjeet</label>
+<textarea id="wsInstructions" placeholder="Lue tehtävät huolellisesti..."></textarea>
+<hr>
+<h3>➕ Tehtävät ja osiot</h3>
+<div id="blocks"></div>
+<button onclick="addBlock()">＋ Lisää kysymys / osio</button>
+<hr>
+<label>Lisää lopputeksti</label>
+<textarea id="wsEnd" placeholder="Onnea tehtäviin!"></textarea>
+<div class="item">
+<b>Esikatselu</b>
+<p>Voit tarkistaa paperin ennen julkaisemista.</p>
+<button onclick="previewWorksheet()">👁️ Esikatsele</button>
+</div>
+<button onclick="publishWorksheet()">💾 Tallenna ja julkaise</button>
+</div>`:""}
+<div id="preview"></div>
+<h3>📚 Julkaistut tehtäväpaperit</h3>
+${ws.slice().reverse().map(w=>{
+let i=d.worksheets.indexOf(w);
+return `<div class="card">
+<h3>${esc(w.title)}</h3>
+<p>${esc(w.subject)} · ${esc(w.topic)} · ${esc(w.audience==="ALL"?"Kaikki luokat":w.audience)}</p>
+<p>Tekijä: ${esc(w.author)}</p>
+<button onclick="downloadWorksheet(${i})">⬇️ Lataa tehtäväpaperi</button>
+<button onclick="copyWorksheet(${i})">📋 Kopioi</button>
+<button onclick="showWorksheet(${i})">👁️ Näytä</button>
+${role==="teacher"?`<button onclick="deleteWorksheet(${i})">Poista</button>`:""}
+</div>`;
+}).join("")||`<div class="card">Ei julkaistuja tehtäväpapereita.</div>`}`;
+if(role==="teacher"){blocks=[];addBlock()}
+}
+function addBlock(){
+blocks.push({type:"question",title:"",text:""});
+drawBlocks();
+}
+function drawBlocks(){
+let el=document.getElementById("blocks");
+if(!el)return;
+el.innerHTML=blocks.map((b,i)=>`
+<div class="item">
+<label>Osio ${i+1}</label>
+<select onchange="blocks[${i}].type=this.value">
+<option value="question" ${b.type==="question"?"selected":""}>Kysymys</option>
+<option value="heading" ${b.type==="heading"?"selected":""}>Otsikko</option>
+<option value="text" ${b.type==="text"?"selected":""}>Tekstiosio</option>
+<option value="calculation" ${b.type==="calculation"?"selected":""}>Laskutehtävä</option>
+</select>
+<input placeholder="Otsikko" value="${esc(b.title)}"
+oninput="blocks[${i}].title=this.value">
+<textarea placeholder="Tehtävä tai sisältö"
+oninput="blocks[${i}].text=this.value">${esc(b.text)}</textarea>
+<button onclick="blocks.splice(${i},1);drawBlocks()">Poista osio</button>
+</div>`).join("");
+}
+function worksheetObject(){
+return {
+title:wsTitle.value.trim(),
+logo:wsLogo.value.trim(),
+subject:wsSubject.value,
+topic:wsTopic.value.trim(),
+audience:wsAudience.value,
+instructions:wsInstructions.value.trim(),
+end:wsEnd.value.trim(),
+blocks:blocks.map(b=>({...b})),
+author:username,
+grade:myGrade,
+date:new Date().toLocaleDateString("fi-FI")
+};
+}
+function worksheetHTML(w){
+return `<!DOCTYPE html><html lang="fi"><head><meta charset="UTF-8">
+<title>${esc(w.title)}</title>
+<style>body{font-family:Arial;max-width:800px;margin:40px auto;padding:20px;color:#222}
+h1{border-bottom:2px solid #555;padding-bottom:12px}
+.task{border:1px solid #ddd;padding:16px;margin:15px 0;border-radius:8px}
+.line{border-bottom:1px solid #aaa;height:35px}
+@media print{button{display:none}}</style></head><body>
+<header><h2>${esc(w.logo)}</h2></header>
+<h1>${esc(w.title)}</h1>
+<p>${esc(w.subject)} · ${esc(w.topic)} · ${esc(w.grade)}</p>
+<p>Nimi: __________________________ Päivämäärä: ______________</p>
+<p>${esc(w.instructions)}</p>
+${w.blocks.map((b,i)=>`<div class="task">
+${b.type==="heading"?`<h2>${esc(b.title)}</h2>`:`<h3>${i+1}. ${esc(b.title||"Tehtävä")}</h3>`}
+<p>${esc(b.text)}</p>
+${b.type==="question"||b.type==="calculation"?`<div class="line"></div><div class="line"></div>`:""}
+</div>`).join("")}
+<p>${esc(w.end)}</p>
+<button onclick="window.print()">Tulosta tehtäväpaperi</button>
+</body></html>`;
+}
+function previewWorksheet(){
+let w=worksheetObject();
+if(!w.title)return alert("Anna tehtäväpaperille otsikko.");
+document.getElementById("preview").innerHTML=
+`<div class="card"><h3>Esikatselu</h3>${worksheetHTML(w).replace(/</g,"&lt;").replace(/>/g,"&gt;").slice(0,500)}...<p>Esikatselu: ${esc(w.title)}</p></div>`;
+}
+function publishWorksheet(){
+let w=worksheetObject();
+if(!w.title)return alert("Kirjoita otsikko.");
+if(!w.blocks.length)return alert("Lisää vähintään yksi osio.");
+if(!w.blocks.some(b=>b.text.trim()||b.title.trim()))return alert("Lisää tehtävän sisältö.");
+let d=getData();
+d.worksheets.push(w);
+save(d);
+alert("Tehtäväpaperi julkaistu!");
+render();
+}
+function downloadWorksheet(i){
+let w=getData().worksheets[i];
+let blob=new Blob([worksheetHTML(w)],{type:"text/html;charset=utf-8"});
+let url=URL.createObjectURL(blob);
+let a=document.createElement("a");
+a.href=url;
+a.download="tehtavapaperi.html";
+a.click();
+URL.revokeObjectURL(url);
+}
+function copyWorksheet(i){
+let w=getData().worksheets[i];
+let text=`${w.title}\n${w.subject}\n${w.topic}\n${w.instructions}\n`+
+w.blocks.map(b=>b.title+"\n"+b.text).join("\n\n");
+navigator.clipboard.writeText(text)
+.then(()=>alert("Tehtäväpaperin teksti kopioitu!"))
+.catch(()=>alert("Kopiointi ei onnistunut tässä selaimessa."));
+}
+function showWorksheet(i){
+let w=getData().worksheets[i];
+let win=window.open("","_blank");
+if(!win)return alert("Salli ponnahdusikkunat.");
+win.document.write(worksheetHTML(w));
+win.document.close();
+}
+function deleteWorksheet(i){
+if(!confirm("Poistetaanko tehtäväpaperi?"))return;
+let d=getData();d.worksheets.splice(i,1);save(d);render();
+}
+
+/* MATH GAMES */
+
+function games(m){
+m.innerHTML=`
+<h2>🎮 Matematiikkapelit</h2>
+<div class="card">
+<h3>Vaikeustaso</h3>
+<select id="difficulty">
+<option value="easy">🟢 Helppo</option>
+<option value="medium" selected>🟡 Keskitaso</option>
+<option value="hard">🔴 Vaikea</option>
+<option value="extreme">🔥 Todella vaikea</option>
+</select>
+<h3>Laskutyyppi</h3>
+<select id="operation">
+<option value="mix">Kaikki</option>
+<option value="add">➕ Yhteenlasku</option>
+<option value="sub">➖ Vähennyslasku</option>
+<option value="mul">✖️ Kertolasku</option>
+<option value="div">➗ Jakolasku</option>
+<option value="fraction">Murtoluvut</option>
+<option value="percent">Prosentit</option>
+<option value="power">Potenssit</option>
+<option value="root">Neliöjuuret</option>
+</select>
+<button onclick="startGame()">Aloita peli</button>
+</div>
+<div class="card" id="gameArea">Valitse peli!</div>
+<div class="card">🏆 Oikein: <b id="score">0 / 0</b></div>`;
+}
+function rnd(a,b){return Math.floor(Math.random()*(b-a+1))+a}
+function startGame(){
+gameType=operation.value;
+difficulty=document.getElementById("difficulty").value;
+points=0;answered=0;score.textContent="0 / 0";
+question();
+}
+let difficulty="medium";
+function question(){
+let range={easy:15,medium:60,hard:300,extreme:1000}[difficulty];
+let type=gameType;
+if(type==="mix")type=["add","sub","mul","div","fraction","percent","power","root"][rnd(0,7)];
+let a=rnd(2,range),b=rnd(2,range),display="";
+if(type==="add"){gameAnswer=a+b;display=`${a} + ${b}`}
+if(type==="sub"){if(b>a)[a,b]=[b,a];gameAnswer=a-b;display=`${a} − ${b}`}
+if(type==="mul"){a=rnd(5,difficulty==="extreme"?100:30);b=rnd(5,30);gameAnswer=a*b;display=`${a} × ${b}`}
+if(type==="div"){b=rnd(2,20);gameAnswer=rnd(2,40);a=b*gameAnswer;display=`${a} ÷ ${b}`}
+if(type==="fraction"){let den=rnd(2,10),num=rnd(1,den-1),mult=rnd(2,5);gameAnswer=`${num}/${den}`;display=`Sievennä: ${num*mult}/${den*mult}`}
+if(type==="percent"){let p=[10,15,20,25,30,40,50,75][rnd(0,7)];a=rnd(2,20)*10;gameAnswer=a*p/100;display=`${p}% luvusta ${a}`}
+if(type==="power"){a=rnd(2,15);b=rnd(2,4);gameAnswer=a**b;display=`${a}^${b}`}
+if(type==="root"){a=rnd(2,30);gameAnswer=a;display=`√${a*a}`}
+currentQuestion={answer:gameAnswer,type};
+gameArea.innerHTML=`
+<h3>🧠 Ratkaise!</h3>
+<div class="big">${display} = ?</div>
+<input id="gameAnswerInput" placeholder="Vastauksesi">
+<button onclick="checkGame()">Tarkista</button>
+<p id="feedback"></p>
+<button onclick="question()">Seuraava lasku</button>`;
+}
+function checkGame(){
+let v=document.getElementById("gameAnswerInput").value.trim().replace(/\s/g,"");
+if(!v)return;
+let target=String(currentQuestion.answer);
+let ok=v.replace(",",".").toLowerCase()===target.toLowerCase();
+answered++;if(ok)points++;
+feedback.textContent=ok?"🎉 Oikein!":"❌ Väärin. Oikea vastaus: "+target;
+feedback.className=ok?"good":"bad";
+score.textContent=points+" / "+answered;
+}
+
+/* PRIVATE TEACHER NOTES */
+
+function discipline(m){
+if(role!=="teacher")return;
+let d=getData();
+m.innerHTML=`
+<h2>📋 Jälki-istunto / Opettajan merkinnät</h2>
+<div class="card">
+<label>Oppilaan nimi</label><input id="punishName">
+<label>Merkinnän kuvaus</label><textarea id="punishReason"></textarea>
+<label>Toimenpide</label>
+<select id="punishType">
+<option>Jälki-istunto</option>
+<option>Opettajan keskustelu</option>
+<option>Yhteydenotto kotiin</option>
+<option>Muu koulun käytäntö</option>
+</select>
+<button onclick="addPunishment()">Tallenna</button>
+</div>
+${d.punishments.map((p,i)=>`
+<div class="card"><b>${esc(p.name)}</b>
+<p>${esc(p.type)} · ${esc(p.reason)}</p>
+<small>${esc(p.teacher)} · ${esc(p.date)}</small>
+<button onclick="deletePunishment(${i})">Poista</button></div>`).join("")}`;
+}
+function addPunishment(){
+let name=punishName.value.trim(),reason=punishReason.value.trim();
+if(!name||!reason)return alert("Täytä tiedot.");
+let d=getData();
+d.punishments.push({
+name,reason,type:punishType.value,
+teacher:username,date:new Date().toLocaleDateString("fi-FI")
+});
+save(d);render();
+}
+function deletePunishment(i){
+if(!confirm("Poistetaanko merkintä?"))return;
+let d=getData();d.punishments.splice(i,1);save(d);render();
+}
+</script>
+</body>
+</html>
